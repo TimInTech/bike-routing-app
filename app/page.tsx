@@ -1,13 +1,31 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import type React from "react"
+
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MapPin, Route, Settings, Download, Bike, Mountain, Target, Github, ExternalLink } from "lucide-react"
+import {
+  Route,
+  Settings,
+  Download,
+  Bike,
+  Mountain,
+  Target,
+  Github,
+  ExternalLink,
+  Twitter,
+  Linkedin,
+  Youtube,
+  Mail,
+  Globe,
+  Search,
+  Loader2,
+} from "lucide-react"
 import BikeMapComponent from "@/components/bike-map-component"
 import RoutePanel from "@/components/route-panel"
 import GPXExporter from "@/components/gpx-exporter"
@@ -30,6 +48,31 @@ interface DistanceZone {
   color: string
 }
 
+interface NominatimResult {
+  lat: string
+  lon: string
+  display_name: string
+  place_id: string
+  type: string
+  importance: number
+}
+
+interface GeocodingCache {
+  [key: string]: {
+    coords: [number, number]
+    displayName: string
+    timestamp: number
+  }
+}
+
+interface AutocompleteSuggestion {
+  display_name: string
+  lat: string
+  lon: string
+  place_id: string
+  type: string
+}
+
 export default function BikeTrackingApp() {
   const [startLocation, setStartLocation] = useState("")
   const [startCoords, setStartCoords] = useState<[number, number] | null>(null)
@@ -48,6 +91,18 @@ export default function BikeTrackingApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const [gpsError, setGpsError] = useState("")
+
+  // Autocomplete states
+  const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1)
+
+  // Refs
+  const geocodingCacheRef = useRef<GeocodingCache>({})
+  const lastRequestTimeRef = useRef<number>(0)
+  const autocompleteTimeoutRef = useRef<NodeJS.Timeout>()
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (useGPS) {
@@ -78,6 +133,291 @@ export default function BikeTrackingApp() {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
+  }
+
+  // Rate limiting für Nominatim API (max 1 request/second)
+  const rateLimitedFetch = async (url: string): Promise<Response> => {
+    const now = Date.now()
+    const timeSinceLastRequest = now - lastRequestTimeRef.current
+
+    if (timeSinceLastRequest < 1000) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 - timeSinceLastRequest))
+    }
+
+    lastRequestTimeRef.current = Date.now()
+
+    return fetch(url, {
+      headers: {
+        "User-Agent": "BikeRoutePlanner/1.0 (timintech.de)",
+      },
+    })
+  }
+
+  // Erweiterte Geocoding-Funktion mit Nominatim API
+  const geocodeLocation = async (location: string): Promise<[number, number]> => {
+    const input = location.toLowerCase().trim()
+
+    // Cache prüfen
+    const cacheKey = input
+    const cached = geocodingCacheRef.current[cacheKey]
+    if (cached && Date.now() - cached.timestamp < 3600000) {
+      // 1 Stunde Cache
+      return cached.coords
+    }
+
+    // Koordinaten-Eingabe erkennen (z.B. "52.52, 13.405" oder "52.52,13.405")
+    const coordMatch = input.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/)
+    if (coordMatch) {
+      const lat = Number.parseFloat(coordMatch[1])
+      const lng = Number.parseFloat(coordMatch[2])
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        return [lat, lng]
+      }
+    }
+
+    try {
+      // Nominatim API Anfrage
+      const encodedQuery = encodeURIComponent(location)
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedQuery}&limit=1&countrycodes=de&addressdetails=1`
+
+      const response = await rateLimitedFetch(url)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const results: NominatimResult[] = await response.json()
+
+      if (results.length > 0) {
+        const result = results[0]
+        const coords: [number, number] = [Number.parseFloat(result.lat), Number.parseFloat(result.lon)]
+
+        // Cache speichern
+        geocodingCacheRef.current[cacheKey] = {
+          coords,
+          displayName: result.display_name,
+          timestamp: Date.now(),
+        }
+
+        return coords
+      }
+
+      // Fallback auf statische Datenbank
+      return await geocodeLocationFallback(location)
+    } catch (error) {
+      console.warn("Nominatim API Fehler:", error)
+
+      // Fallback auf statische Datenbank
+      try {
+        return await geocodeLocationFallback(location)
+      } catch (fallbackError) {
+        throw new Error(
+          `Ort "${location}" konnte nicht gefunden werden. Bitte überprüfen Sie die Eingabe oder versuchen Sie es mit einer anderen Schreibweise.`,
+        )
+      }
+    }
+  }
+
+  // Fallback Geocoding mit statischer Datenbank
+  const geocodeLocationFallback = async (location: string): Promise<[number, number]> => {
+    const input = location.toLowerCase().trim()
+
+    // Erweiterte Städte-Datenbank
+    const locationMap: { [key: string]: [number, number] } = {
+      // Großstädte
+      berlin: [52.52, 13.405],
+      münchen: [48.1351, 11.582],
+      hamburg: [53.5511, 9.9937],
+      köln: [50.9375, 6.9603],
+      frankfurt: [50.1109, 8.6821],
+      stuttgart: [48.7758, 9.1829],
+      düsseldorf: [51.2277, 6.7735],
+      dortmund: [51.5136, 7.4653],
+      essen: [51.4556, 7.0116],
+      leipzig: [51.3397, 12.3731],
+      bremen: [53.0793, 8.8017],
+      dresden: [51.0504, 13.7373],
+      hannover: [52.3759, 9.732],
+      nürnberg: [49.4521, 11.0767],
+      bielefeld: [52.0302, 8.5325],
+      münster: [51.9607, 7.6261],
+      paderborn: [51.7189, 8.7575],
+      lemgo: [52.0286, 8.8998],
+      detmold: [51.9387, 8.8794],
+      "bad salzuflen": [52.0864, 8.7491],
+      lage: [51.9929, 8.7886],
+      blomberg: [51.9439, 9.0906],
+      horn: [51.8644, 8.9736],
+      leopoldshöhe: [52.0167, 8.7],
+      oerlinghausen: [51.9667, 8.6667],
+      schieder: [51.9167, 9.1667],
+      schlangen: [51.7833, 8.8333],
+      augustdorf: [51.9, 8.7333],
+      // Weitere Städte...
+    }
+
+    // PLZ-Datenbank (erweitert)
+    const plzMap: { [key: string]: [number, number] } = {
+      // Bielefeld/OWL Region
+      "33602": [52.0302, 8.5325], // Bielefeld
+      "33604": [52.0302, 8.5325],
+      "33605": [52.0302, 8.5325],
+      "33607": [52.0302, 8.5325],
+      "33609": [52.0302, 8.5325],
+      "33611": [52.0302, 8.5325],
+      "33613": [52.0302, 8.5325],
+      "33615": [52.0302, 8.5325],
+      "33617": [52.0302, 8.5325],
+      "33619": [52.0302, 8.5325],
+      "33818": [52.0167, 8.7], // Leopoldshöhe
+      "32657": [52.0286, 8.8998], // Lemgo
+      "32756": [51.9387, 8.8794], // Detmold
+      "32105": [52.0864, 8.7491], // Bad Salzuflen
+      "32791": [51.9929, 8.7886], // Lage
+      "32825": [51.9439, 9.0906], // Blomberg
+      "32805": [51.8644, 8.9736], // Horn-Bad Meinberg
+      "33813": [51.9667, 8.6667], // Oerlinghausen
+      "32816": [51.9167, 9.1667], // Schieder-Schwalenberg
+      "33189": [51.7833, 8.8333], // Schlangen
+      "32832": [51.9, 8.7333], // Augustdorf
+
+      // Berlin
+      "10115": [52.5244, 13.4105],
+      "10117": [52.5186, 13.3761],
+      "10119": [52.5297, 13.4019],
+
+      // München
+      "80331": [48.1374, 11.5755],
+      "80333": [48.1374, 11.5755],
+      "80335": [48.1374, 11.5755],
+
+      // Hamburg
+      "20095": [53.5511, 9.9937],
+      "20097": [53.5511, 9.9937],
+      "20099": [53.5511, 9.9937],
+
+      // Köln
+      "50667": [50.9375, 6.9603],
+      "50668": [50.9375, 6.9603],
+      "50670": [50.9375, 6.9603],
+
+      // Frankfurt
+      "60306": [50.1109, 8.6821],
+      "60308": [50.1109, 8.6821],
+      "60311": [50.1109, 8.6821],
+    }
+
+    // Suche in PLZ (exakte Übereinstimmung)
+    if (plzMap[input]) {
+      return plzMap[input]
+    }
+
+    // Suche in Städten (Teilstring-Matching)
+    for (const [city, coords] of Object.entries(locationMap)) {
+      if (input.includes(city) || city.includes(input)) {
+        return coords
+      }
+    }
+
+    // Wenn nichts gefunden wurde
+    throw new Error(`Ort "${location}" nicht in der lokalen Datenbank gefunden.`)
+  }
+
+  // Autocomplete-Funktion
+  const fetchAutocompleteSuggestions = async (query: string): Promise<AutocompleteSuggestion[]> => {
+    if (query.length < 3) return []
+
+    try {
+      const encodedQuery = encodeURIComponent(query)
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedQuery}&limit=5&countrycodes=de&addressdetails=1`
+
+      const response = await rateLimitedFetch(url)
+
+      if (!response.ok) {
+        return []
+      }
+
+      const results: NominatimResult[] = await response.json()
+
+      return results.map((result) => ({
+        display_name: result.display_name,
+        lat: result.lat,
+        lon: result.lon,
+        place_id: result.place_id,
+        type: result.type,
+      }))
+    } catch (error) {
+      console.warn("Autocomplete API Fehler:", error)
+      return []
+    }
+  }
+
+  // Autocomplete Handler mit Throttling
+  const handleLocationInputChange = (value: string) => {
+    setStartLocation(value)
+    setSelectedSuggestionIndex(-1)
+
+    // Clear existing timeout
+    if (autocompleteTimeoutRef.current) {
+      clearTimeout(autocompleteTimeoutRef.current)
+    }
+
+    if (value.length >= 3) {
+      setIsLoadingSuggestions(true)
+
+      // Throttle API calls
+      autocompleteTimeoutRef.current = setTimeout(async () => {
+        const suggestions = await fetchAutocompleteSuggestions(value)
+        setSuggestions(suggestions)
+        setShowSuggestions(suggestions.length > 0)
+        setIsLoadingSuggestions(false)
+      }, 500) // 500ms delay
+    } else {
+      setSuggestions([])
+      setShowSuggestions(false)
+      setIsLoadingSuggestions(false)
+    }
+  }
+
+  // Suggestion auswählen
+  const selectSuggestion = (suggestion: AutocompleteSuggestion) => {
+    setStartLocation(suggestion.display_name)
+    setStartCoords([Number.parseFloat(suggestion.lat), Number.parseFloat(suggestion.lon)])
+    setShowSuggestions(false)
+    setSuggestions([])
+
+    // Cache speichern
+    geocodingCacheRef.current[suggestion.display_name.toLowerCase()] = {
+      coords: [Number.parseFloat(suggestion.lat), Number.parseFloat(suggestion.lon)],
+      displayName: suggestion.display_name,
+      timestamp: Date.now(),
+    }
+  }
+
+  // Keyboard Navigation für Suggestions
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!showSuggestions || suggestions.length === 0) return
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault()
+        setSelectedSuggestionIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0))
+        break
+      case "ArrowUp":
+        e.preventDefault()
+        setSelectedSuggestionIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1))
+        break
+      case "Enter":
+        e.preventDefault()
+        if (selectedSuggestionIndex >= 0) {
+          selectSuggestion(suggestions[selectedSuggestionIndex])
+        }
+        break
+      case "Escape":
+        setShowSuggestions(false)
+        setSelectedSuggestionIndex(-1)
+        break
+    }
   }
 
   const addCustomDistance = () => {
@@ -147,165 +487,6 @@ export default function BikeTrackingApp() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const geocodeLocation = async (location: string): Promise<[number, number]> => {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    const input = location.toLowerCase().trim()
-
-    // Koordinaten-Eingabe erkennen (z.B. "52.52, 13.405" oder "52.52,13.405")
-    const coordMatch = input.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/)
-    if (coordMatch) {
-      const lat = Number.parseFloat(coordMatch[1])
-      const lng = Number.parseFloat(coordMatch[2])
-      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-        return [lat, lng]
-      }
-    }
-
-    // Erweiterte Städte-Datenbank
-    const locationMap: { [key: string]: [number, number] } = {
-      // Großstädte
-      berlin: [52.52, 13.405],
-      münchen: [48.1351, 11.582],
-      hamburg: [53.5511, 9.9937],
-      köln: [50.9375, 6.9603],
-      frankfurt: [50.1109, 8.6821],
-      stuttgart: [48.7758, 9.1829],
-      düsseldorf: [51.2277, 6.7735],
-      dortmund: [51.5136, 7.4653],
-      essen: [51.4556, 7.0116],
-      leipzig: [51.3397, 12.3731],
-      bremen: [53.0793, 8.8017],
-      dresden: [51.0504, 13.7373],
-      hannover: [52.3759, 9.732],
-      nürnberg: [49.4521, 11.0767],
-      duisburg: [51.4344, 6.7623],
-      bochum: [51.4818, 7.2162],
-      wuppertal: [51.2562, 7.1508],
-      bielefeld: [52.0302, 8.5325],
-      bonn: [50.7374, 7.0982],
-      münster: [51.9607, 7.6261],
-      karlsruhe: [49.0069, 8.4037],
-      mannheim: [49.4875, 8.466],
-      augsburg: [48.3705, 10.8978],
-      wiesbaden: [50.0782, 8.2398],
-      gelsenkirchen: [51.5177, 7.0857],
-      mönchengladbach: [51.1805, 6.4428],
-      braunschweig: [52.2689, 10.5268],
-      chemnitz: [50.8278, 12.9214],
-      kiel: [54.3233, 10.1228],
-      aachen: [50.7753, 6.0839],
-      halle: [51.4969, 11.9695],
-      magdeburg: [52.1205, 11.6276],
-      freiburg: [47.999, 7.8421],
-      krefeld: [51.3388, 6.5853],
-      lübeck: [53.8655, 10.6866],
-      oberhausen: [51.4963, 6.8516],
-      erfurt: [50.9848, 11.0299],
-      mainz: [49.9929, 8.2473],
-      rostock: [54.0887, 12.1432],
-      kassel: [51.3127, 9.4797],
-      hagen: [51.367, 7.4637],
-      potsdam: [52.3906, 13.0645],
-      saarbrücken: [49.2401, 6.9969],
-      hamm: [51.6806, 7.8142],
-      mülheim: [51.4266, 6.8828],
-      ludwigshafen: [49.4774, 8.4451],
-      leverkusen: [51.0353, 6.9804],
-      oldenburg: [53.1435, 8.2146],
-      osnabrück: [52.2799, 8.0472],
-      solingen: [51.1657, 7.0678],
-      heidelberg: [49.3988, 8.6724],
-      herne: [51.5386, 7.2221],
-      neuss: [51.2048, 6.6963],
-      darmstadt: [49.8728, 8.6512],
-      paderborn: [51.7189, 8.7575],
-      regensburg: [49.0134, 12.1016],
-      ingolstadt: [48.7665, 11.4257],
-      würzburg: [49.7913, 9.9534],
-      fürth: [49.4771, 10.9886],
-      wolfsburg: [52.4227, 10.7865],
-      offenbach: [50.0955, 8.7761],
-      ulm: [48.4011, 9.9876],
-      heilbronn: [49.1427, 9.2109],
-      pforzheim: [48.8944, 8.6954],
-      göttingen: [51.5412, 9.9158],
-      bottrop: [51.5216, 6.9289],
-      trier: [49.7596, 6.6441],
-      recklinghausen: [51.6142, 7.1969],
-      reutlingen: [48.4919, 9.2041],
-      bremerhaven: [53.5396, 8.5809],
-      koblenz: [50.3569, 7.589],
-      bergisch: [51.0315, 7.1403],
-      jena: [50.9278, 11.589],
-      remscheid: [51.1789, 7.1894],
-      erlangen: [49.5897, 11.004],
-      moers: [51.4508, 6.6407],
-      siegen: [50.8749, 8.024],
-      hildesheim: [52.1561, 9.9511],
-      salzgitter: [52.1565, 10.4075],
-    }
-
-    // PLZ-Datenbank (Auswahl wichtiger PLZ)
-    const plzMap: { [key: string]: [number, number] } = {
-      // Berlin
-      "10115": [52.5244, 13.4105],
-      "10117": [52.5186, 13.3761],
-      "10119": [52.5297, 13.4019],
-      "10178": [52.517, 13.4124],
-      "10179": [52.5123, 13.4107],
-      "10243": [52.5065, 13.453],
-      "10245": [52.5033, 13.4689],
-      "10247": [52.5154, 13.4581],
-      "10249": [52.5225, 13.4527],
-      // München
-      "80331": [48.1374, 11.5755],
-      "80333": [48.1374, 11.5755],
-      "80335": [48.1374, 11.5755],
-      "80336": [48.1374, 11.5755],
-      "80337": [48.1374, 11.5755],
-      "80339": [48.1374, 11.5755],
-      // Hamburg
-      "20095": [53.5511, 9.9937],
-      "20097": [53.5511, 9.9937],
-      "20099": [53.5511, 9.9937],
-      "20144": [53.5511, 9.9937],
-      "20146": [53.5511, 9.9937],
-      "20148": [53.5511, 9.9937],
-      // Köln
-      "50667": [50.9375, 6.9603],
-      "50668": [50.9375, 6.9603],
-      "50670": [50.9375, 6.9603],
-      "50672": [50.9375, 6.9603],
-      "50674": [50.9375, 6.9603],
-      "50676": [50.9375, 6.9603],
-      // Frankfurt
-      "60306": [50.1109, 8.6821],
-      "60308": [50.1109, 8.6821],
-      "60311": [50.1109, 8.6821],
-      "60313": [50.1109, 8.6821],
-      "60314": [50.1109, 8.6821],
-      "60316": [50.1109, 8.6821],
-    }
-
-    // Suche in Städten
-    for (const [city, coords] of Object.entries(locationMap)) {
-      if (input.includes(city)) {
-        return coords
-      }
-    }
-
-    // Suche in PLZ
-    if (plzMap[input]) {
-      return plzMap[input]
-    }
-
-    // Wenn nichts gefunden wurde
-    throw new Error(
-      `Ort "${location}" nicht gefunden. Versuchen Sie: Städte (Berlin, München), PLZ (10115, 80331) oder Koordinaten (52.52, 13.405)`,
-    )
   }
 
   const calculateDirectBikeRoutes = async (
@@ -439,6 +620,52 @@ export default function BikeTrackingApp() {
     return true
   })
 
+  // Social Media Links für TimInTech
+  const socialLinks = [
+    {
+      name: "GitHub",
+      url: "https://github.com/TimInTech",
+      icon: Github,
+      color: "hover:bg-gray-800",
+      bgColor: "bg-gray-900",
+    },
+    {
+      name: "LinkedIn",
+      url: "https://linkedin.com/in/timintech",
+      icon: Linkedin,
+      color: "hover:bg-blue-700",
+      bgColor: "bg-blue-600",
+    },
+    {
+      name: "Twitter",
+      url: "https://twitter.com/TimInTech",
+      icon: Twitter,
+      color: "hover:bg-sky-600",
+      bgColor: "bg-sky-500",
+    },
+    {
+      name: "YouTube",
+      url: "https://youtube.com/@TimInTech",
+      icon: Youtube,
+      color: "hover:bg-red-700",
+      bgColor: "bg-red-600",
+    },
+    {
+      name: "Website",
+      url: "https://timintech.dev",
+      icon: Globe,
+      color: "hover:bg-green-700",
+      bgColor: "bg-green-600",
+    },
+    {
+      name: "E-Mail",
+      url: "mailto:contact@timintech.dev",
+      icon: Mail,
+      color: "hover:bg-orange-700",
+      bgColor: "bg-orange-600",
+    },
+  ]
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-4">
       <div className="max-w-7xl mx-auto">
@@ -480,17 +707,49 @@ export default function BikeTrackingApp() {
                     </div>
 
                     {!useGPS && (
-                      <div className="space-y-2">
-                        <Label htmlFor="location">Manueller Startort</Label>
+                      <div className="space-y-2 relative">
+                        <Label htmlFor="location">Startort eingeben</Label>
                         <div className="relative">
-                          <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                           <Input
+                            ref={inputRef}
                             id="location"
-                            placeholder="Stadt, PLZ oder Koordinaten (z.B. Berlin, 10115, 52.52,13.405)"
+                            placeholder="z.B. 33818 Leopoldshöhe, Lemgo, Bielefeld Oldentruper Str. 15"
                             value={startLocation}
-                            onChange={(e) => setStartLocation(e.target.value)}
-                            className="pl-10"
+                            onChange={(e) => handleLocationInputChange(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                            className="pl-10 pr-10"
                           />
+                          {isLoadingSuggestions && (
+                            <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-gray-400" />
+                          )}
+                        </div>
+
+                        {/* Autocomplete Suggestions */}
+                        {showSuggestions && suggestions.length > 0 && (
+                          <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                            {suggestions.map((suggestion, index) => (
+                              <div
+                                key={suggestion.place_id}
+                                className={`px-4 py-2 cursor-pointer hover:bg-gray-100 ${
+                                  index === selectedSuggestionIndex ? "bg-blue-50 border-l-2 border-blue-500" : ""
+                                }`}
+                                onClick={() => selectSuggestion(suggestion)}
+                              >
+                                <div className="font-medium text-sm text-gray-900 truncate">
+                                  {suggestion.display_name.split(",")[0]}
+                                </div>
+                                <div className="text-xs text-gray-500 truncate">{suggestion.display_name}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="text-xs text-gray-500">
+                          💡 Tipp: Geben Sie Städte, PLZ oder Adressen ein (z.B. "33818", "Lemgo", "Bielefeld
+                          Hauptbahnhof")
                         </div>
                       </div>
                     )}
@@ -620,45 +879,84 @@ export default function BikeTrackingApp() {
           </div>
         </div>
 
-        {/* Developer Footer */}
+        {/* Enhanced Developer Footer with Social Media */}
         <footer className="mt-12 border-t border-gray-200 pt-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="text-sm text-gray-600">
-                <span className="font-medium">Entwickelt von TimInTech</span>
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+            {/* Developer Info */}
+            <div className="flex flex-col md:flex-row items-center gap-4">
+              <div className="text-center md:text-left">
+                <div className="text-lg font-semibold text-gray-900 mb-1">Entwickelt von TimInTech</div>
+                <div className="text-sm text-gray-600">Full-Stack Developer & Tech Enthusiast</div>
               </div>
+            </div>
+
+            {/* Social Media Links */}
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {socialLinks.map((social) => {
+                const IconComponent = social.icon
+                return (
+                  <a
+                    key={social.name}
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`flex items-center gap-2 px-3 py-2 ${social.bgColor} text-white rounded-lg ${social.color} transition-colors text-sm group`}
+                    title={`${social.name} - TimInTech`}
+                  >
+                    <IconComponent className="h-4 w-4" />
+                    <span className="hidden sm:inline">{social.name}</span>
+                    <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Additional Info */}
+          <div className="mt-6 pt-4 border-t border-gray-100">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span>© 2024 Bike Route Planner</span>
+                <span>•</span>
+                <span>OpenStreetMap basiert</span>
+                <span>•</span>
+                <span>Nominatim API</span>
+                <span>•</span>
+                <span>GPX Export</span>
+                <span>•</span>
+                <span>Open Source</span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-gray-400">
+                <span>🚴 Fahrradrouten</span>
+                <span>•</span>
+                <span>🗺️ OpenStreetMap</span>
+                <span>•</span>
+                <span>📍 GPS Integration</span>
+                <span>•</span>
+                <span>📁 GPX Export</span>
+                <span>•</span>
+                <span>🎯 Luftlinie & Realistische Routen</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Contact Info */}
+          <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+            <div className="text-xs text-gray-500">
+              <span>Fragen oder Feedback? </span>
+              <a href="mailto:contact@timintech.dev" className="text-blue-600 hover:text-blue-800 underline">
+                Kontaktiere TimInTech
+              </a>
+              <span> oder besuche das </span>
               <a
                 href="https://github.com/TimInTech"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm"
+                className="text-blue-600 hover:text-blue-800 underline"
               >
-                <Github className="h-4 w-4" />
-                <span>GitHub</span>
-                <ExternalLink className="h-3 w-3" />
+                GitHub Profil
               </a>
-            </div>
-
-            <div className="flex items-center gap-4 text-xs text-gray-500">
-              <span>© 2024 Bike Route Planner</span>
-              <span>•</span>
-              <span>OpenStreetMap basiert</span>
-              <span>•</span>
-              <span>GPX Export</span>
-            </div>
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-gray-400">
-              <span>🚴 Fahrradrouten</span>
-              <span>•</span>
-              <span>🗺️ OpenStreetMap</span>
-              <span>•</span>
-              <span>📍 GPS Integration</span>
-              <span>•</span>
-              <span>📁 GPX Export</span>
-              <span>•</span>
-              <span>🎯 Luftlinie & Realistische Routen</span>
             </div>
           </div>
         </footer>
