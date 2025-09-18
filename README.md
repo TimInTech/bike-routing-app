@@ -1,86 +1,109 @@
+English | [Deutsch](./README.de.md)
 
-# 🚴‍♂️ Bike Route Planner
+# Bike Route Planner
 
-**Bike Route Planner** is a modern, interactive web application that helps cyclists explore reachable destinations based on customizable distances. The app supports both **straight-line (air distance)** zones and **realistic route calculation** using bike paths and street networks. It also offers **GPX export** for use in external navigation tools (e.g., QMode, Komoot).
+Interactive web app to explore reachable cycling destinations with air-distance zones and realistic bike-route calculation, including GPX export.
+Supports GPS/manual start, configurable distance rings, route generation, elevation info, and export for external nav tools.
 
-![App Preview](./preview.png)
+<p align="center">
+  <img src="docs/assets/preview-map.png" alt="Bike Route Planner primary screenshot" />
+</p>
+<p align="center">
+  <img src="docs/assets/preview-panel.png" alt="Bike Route Planner secondary screenshot" />
+</p>
 
+<p align="center">
+  <img src="https://skillicons.dev/icons?i=nextjs,ts,react,tailwind,leaflet,docker,vercel" alt="Tech stack icons" />
+</p>
 
+## Features
+- Discover reachable cycling destinations with configurable distance rings.
+- Toggle straight-line zones and realistic bike-route calculation.
+- GPS or manual start selection.
+- Multiple route options with distance/time summaries.
+- Optional elevation information.
+- GPX export for navigation devices/apps.
+- Responsive UI with filters and overlays.
+- Built for fast load and simple deployment.
 
----
+## Tech
+- Framework: Next.js
+- Language: TypeScript
+- Build/Bundle: Next build
+- Mapping: Leaflet & OpenStreetMap
+- Other: Tailwind CSS, shadcn/ui, pnpm, Docker, Vercel
 
-## 🌟 Features
+## Requirements
+- Node.js ≥ 20
+- pnpm or npm
+- Optional: Docker / Docker Compose
 
-- 🗺️ Interactive map with Leaflet & OpenStreetMap
-- 📍 GPS-based or manual start point selection
-- 📏 Configurable distance zones (10 km, 25 km, 50 km or custom)
-- 🚴‍♀️ Option to calculate routes using air distance or real bike paths
-- 🧭 Automatic route generation in multiple directions
-- 📦 GPX export of generated routes
-- 🗻 Optional elevation data visualization
-- 🧩 Clean sidebar UI with route list and filter options
-- ⚙️ Built with shadcn/ui, Tailwind CSS & Next.js 14
-
----
-
-## 🚀 Getting Started
-
-### 1. Clone the repository
-
+## Quickstart (Local)
 ```bash
-git clone https://github.com/TimInTech/bike-routing-app.git
-cd bike-routing-app
-````
-
-### 2. Install dependencies
-
-```bash
-pnpm install
+pnpm install    # or: npm install
+pnpm dev        # or: npm run dev
+# production:
+pnpm build && pnpm start
+# alternate port:
+PORT=3001 pnpm start
 ```
 
-> Don’t have `pnpm` yet?
->
-> ```bash
-> npm install -g pnpm
-> ```
-
-### 3. Start the development server
-
+## Docker
 ```bash
-pnpm dev
+docker build -t bike-routing-app:latest .
+docker run --rm -p 3000:3000 --name bike-routing-app bike-routing-app:latest
+# if name conflict:
+docker rm -f bike-routing-app
+# alternate host port:
+docker run --rm -p 3100:3000 --name bike-routing-app bike-routing-app:latest
 ```
 
-Then open your browser at:
-[http://localhost:3000](http://localhost:3000)
+## Docker Compose
+```yaml
+services:
+  bike-routing-app:
+    build: .
+    image: bike-routing-app:latest
+    container_name: bike-routing-app
+    ports: ["3000:3000"]
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+```
+```bash
+docker compose up --build
+```
 
----
+## Configuration
+PORT (default 3000), HOSTNAME (default 0.0.0.0)
+(optional) MAP_TILE_URL, NOMINATIM_BASE_URL
 
-## 🧱 Tech Stack
+Build output: Next.js standalone or default .next
+Static: Public assets under /public and docs/assets
 
-* ⚛️ [Next.js 14](https://nextjs.org/)
-* 🧩 [shadcn/ui](https://ui.shadcn.com/)
-* 🎨 Tailwind CSS
-* 🗺️ [Leaflet.js](https://leafletjs.com/)
-* 🌐 OpenStreetMap
-* ⛓️ TypeScript, pnpm, Vercel-ready
+## (Optional) API / Routes
+Keep this section only if the repo exposes API routes.
 
----
+## (Optional) PWA / Offline
+Keep only if applicable. Routes: , fallback , strategy 
 
-## 📤 Deployment
+## Testing
+```bash
+pnpm test     # or: npm run test
+```
 
-You can deploy this project using [Vercel](https://vercel.com), or any other platform that supports Next.js.
+## Troubleshooting
+- Port in use (EADDRINUSE): use PORT=3001 or free the port.
+- Container name in use: docker rm -f bike-routing-app or change --name.
+- Healthcheck: open http://127.0.0.1:3000/ inside the container.
 
-A Dockerfile or self-hosting guide can be added on request.
+## Contributing
+Open issues or pull requests with clear steps and screenshots where relevant.
 
----
-
-## 👤 Author
-
-> Developed by [**TimInTech**](https://github.com/TimInTech)
-
----
-
-## 📄 License
-
-MIT © 2025 TimInTech
-
+## License
+MIT — see LICENSE.
