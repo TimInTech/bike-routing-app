@@ -6,11 +6,9 @@ Interactive web app to explore reachable cycling destinations with air-distance 
 Supports GPS/manual start, configurable distance rings, route generation, elevation info, and export for external nav tools.
 
 <p align="center">
-  <img src="docs/assets/preview-map.png" alt="Bike Route Planner primary screenshot" />
+  <img src="preview.png" alt="Bike Route Planner primary screenshot" />
 </p>
-<p align="center">
-  <img src="docs/assets/preview-panel.png" alt="Bike Route Planner secondary screenshot" />
-</p>
+
 
 <p align="center">
   <img src="https://skillicons.dev/icons?i=nextjs,ts,react,tailwind,leaflet,docker,vercel" alt="Tech stack icons" />
