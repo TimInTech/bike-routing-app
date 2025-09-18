@@ -6,11 +6,9 @@ Interaktive Web-App zur Erkundung erreichbarer Ziele mit Luftlinien-Zonen und re
 Unterstützt GPS/manuellen Start, konfigurierbare Entfernungsringe, Routengenerierung, Höhenmeter und Export für Navi-Tools.
 
 <p align="center">
-  <img src="docs/assets/preview-map.png" alt="Bike Route Planner Kartenansicht" />
+  <img src="preview.png" alt="Bike Route Planner Kartenansicht" />
 </p>
-<p align="center">
-  <img src="docs/assets/preview-panel.png" alt="Bike Route Planner Detailansicht" />
-</p>
+
 
 <p align="center">
   <img src="https://skillicons.dev/icons?i=nextjs,ts,react,tailwind,leaflet,docker,vercel" alt="Technologie-Icons" />
